@@ -1,4 +1,4 @@
-### [H-1] Lack of UniswapV2 slippage protection in UniswapAdapter::\_uniswapInvest enables frontrunners to steal profits
+### [H-1] Lack of UniswapV2 slippage protection in `UniswapAdapter::_uniswapInvest` enables frontrunners to steal profits
 
 **Description:** In `UniswapAdapter::_uniswapInvest` the protocol swaps half of an ERC20 token so that they can invest in both sides of a Uniswap pool. It calls the `swapExactTokensForTokens` function of the `UnisapV2Router01` contract , which has two input parameters to note:
 
@@ -34,8 +34,8 @@ Due to the lack of a deadline, the node who gets this transaction could hold the
 
 **Proof of Concept:**
 
-1. User calls VaultShares::deposit with a vault that has a Uniswap allocation.
-   This calls \_uniswapInvest for a user to invest into Uniswap, and calls the router's swapExactTokensForTokens function.
+1. User calls `VaultShares::deposit` with a vault that has a Uniswap allocation.
+   This calls `_uniswapInvest` for a user to invest into Uniswap, and calls the router's `swapExactTokensForTokens` function.
 
 2. In the mempool, a malicious user could:
    Hold onto this transaction which makes the Uniswap swap
@@ -58,13 +58,14 @@ In the deposit function, consider allowing for custom data.
 
 This way, you could add a deadline to the Uniswap swap, and also allow for more DeFi custom integrations.
 
-For the amountOutMin issue, we recommend one of the following:
+For the `amountOutMin` issue, we recommend one of the following:
 
-Do a price check on something like a Chainlink price feed before making the swap, reverting if the rate is too unfavorable.
-Only deposit 1 side of a Uniswap pool for liquidity. Don't make the swap at all. If a pool doesn't exist or has too low liquidity for a pair of ERC20s, don't allow investment in that pool.
-Note that these recommendation require significant changes to the codebase.
+1. Do a price check on something like a Chainlink price feed before making the swap, reverting if the rate is too unfavorable.
+2. Only deposit 1 side of a Uniswap pool for liquidity. Don't make the swap at all. If a pool doesn't exist or has too low liquidity for a pair of ERC20s, don't allow investment in that pool.
+   Note that these recommendation require significant changes to the codebase.
 
-### [H-2] ERC4626::totalAssets checks the balance of vault's underlying asset even when the asset is invested, resulting in incorrect values being returned
+
+### [H-2] `ERC4626::totalAssets` checks the balance of vault's underlying asset even when the asset is invested, resulting in incorrect values being returned
 
 **Description:** The `ERC4626::totalAssets` function checks the balance of the underlying asset for the vault using the `balanceOf` function.
 
@@ -118,8 +119,7 @@ function testWrongBalance() public {
 
 This would take a considerable re-write of the protocol.
 
-
-### [H-3] Guardians can infinitely mint VaultGuardianTokens and take over DAO, stealing DAO fees and maliciously setting parameters
+### [H-3] Guardians can infinitely mint `VaultGuardianTokens` and take over DAO, stealing DAO fees and maliciously setting parameters
 
 **Description:** Becoming a guardian comes with the perk of getting minted Vault Guardian Tokens (vgTokens). Whenever a guardian successfully calls `VaultGuardiansBase::becomeGuardian` or `VaultGuardiansBase::becomeTokenGuardian`, `_becomeTokenGuardian` is executed, which mints the caller i_vgToken.
 
@@ -146,7 +146,7 @@ Guardians are also free to quit their role at any time, calling the `VaultGuardi
   "updateGuardianStakePrice(uint256)": "d16fe105",
 ```
 
-**Proof of Concept:** 
+**Proof of Concept:**
 
 1. User becomes WETH guardian and is minted vgTokens.
 2. User quits, is given back original WETH allocation.
@@ -200,18 +200,19 @@ Place the following code into `VaultGuardiansBaseTest.t.sol`
 2. vBurn vgTokens when a guardian quits.
 3. Simply don't allocate vgTokens to guardians. Instead, mint the total supply on contract deployment.
 
-
-
-
-
 ### [M-1] Potentially incorrect voting period and delay in governor may affect governance
-
 
 **Description:**
 
 The `VaultGuardianGovernor` contract, based on OpenZeppelin Contract's Governor, implements two functions to define the voting delay (votingDelay) and period (votingPeriod). The contract intends to define a voting delay of 1 day, and a voting period of 7 days. It does it by returning the value 1 days from votingDelay and 7 days from votingPeriod. In Solidity these values are translated to number of seconds.
 
 However, the `votingPeriod` and `votingDelay` functions, by default, are expected to return number of blocks. Not the number seconds. This means that the voting period and delay will be far off what the developers intended, which could potentially affect the intended governance mechanics.
+
+**Impact:**
+
+**Proof of Concept:**
+
+**Recommended Mitigation:**
 
 Consider updating the functions as follows:
 
@@ -227,21 +228,57 @@ function votingPeriod() public pure override returns (uint256) {
 }
 ```
 
-**Impact:**
+### [L-1] Incorrect vault name and symbol
 
-**Proof of Concept:**
-
-**Recommended Mitigation:**
-
-
-
-
-### [M-2]
-
-**Description:**
+**Description:** When new vaults are deployed in the `VaultGuardianBase::becomeTokenGuardian` function, symbol and vault name are set incorrectly when the `token` is equal to `i_tokenTwo`. Consider modifying the function as follows, to avoid errors in off-chain clients reading these values to identify vaults.
 
 **Impact:**
 
 **Proof of Concept:**
 
 **Recommended Mitigation:**
+
+```diff
+else if (address(token) == address(i_tokenTwo)) {
+    tokenVault =
+    new VaultShares(IVaultShares.ConstructorData({
+        asset: token,
+-       vaultName: TOKEN_ONE_VAULT_NAME,
++       vaultName: TOKEN_TWO_VAULT_NAME,
+-       vaultSymbol: TOKEN_ONE_VAULT_SYMBOL,
++       vaultSymbol: TOKEN_TWO_VAULT_SYMBOL,
+        guardian: msg.sender,
+        allocationData: allocationData,
+        aavePool: i_aavePool,
+        uniswapRouter: i_uniswapV2Router,
+        guardianAndDaoCut: s_guardianAndDaoCut,
+        vaultGuardian: address(this),
+        weth: address(i_weth),
+        usdc: address(i_tokenOne)
+    }));
+```
+
+Also, add a new test in the `VaultGuardiansBaseTest.t.sol` file to avoid reintroducing this error, similar to what's done in the test testBecomeTokenGuardianTokenOneName.
+
+### [L-2] Unassigned return value when divesting AAVE funds
+
+**Description:** The `AaveAdapter::_aaveDivest` function is intended to return the amount of assets returned by AAVE after calling its withdraw function. However, the code never assigns a value to the named return variable `amountOfAssetReturned`. As a result, it will always return zero.
+
+While this return value is not being used anywhere in the code, it may cause problems in future changes. Therefore, update the `_aaveDivest` function as follows:
+
+**Impact:**
+
+**Proof of Concept:**
+
+**Recommended Mitigation:**
+
+```javascript
+function _aaveDivest(IERC20 token, uint256 amount) internal returns (uint256 amountOfAssetReturned) {
+-       i_aavePool.withdraw({
++       amountOfAssetReturned = i_aavePool.withdraw({
+            asset: address(token),
+            amount: amount,
+            to: address(this)
+        });
+}
+```
